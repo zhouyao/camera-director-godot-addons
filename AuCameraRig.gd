@@ -1,17 +1,15 @@
-## 相机执行层：持有并驱动 Camera2D，负责平滑、死区、边界、缩放与抖动。
-## 场景里挂上本脚本后，_ready() 会自动把自己注册给 AuCameraDirector。
 extends Node2D
 class_name AuCameraRig
 
 
-## 相机的静态偏移（像素）。抖动结束后会复位到该值。
+## 相机基础偏移（像素）：在不移动锚点的前提下微调取景，同时也是抖动结束后的归位基准。
 @export var base_offset: Vector2 = Vector2(-27.585, -13.195):
 	set(value):
 		base_offset = value
 		if camera != null:
 			camera.offset = value
 
-## 初始缩放，同时作为基础缩放：退出锁定区域 / 过场接管的缩放后回落到该值。
+## 缩放：分量大于 1 画面拉近、小于 1 拉远。可用 AuCameraDirector.tween_zoom() 做平滑过渡。
 @export var zoom: Vector2 = Vector2.ONE:
 	set(value):
 		zoom = value
@@ -20,42 +18,42 @@ class_name AuCameraRig
 
 @export_group("Camera2D")
 
-## 是否启用 Camera2D 自带的位置平滑；关闭后为硬跟随。
+## 是否开启位置平滑：开启后相机缓动逼近锚点，关闭则硬跟随。
 @export var position_smoothing_enabled: bool = true:
 	set(value):
 		position_smoothing_enabled = value
 		if camera != null:
 			camera.position_smoothing_enabled = value
 
-## 位置平滑速度，越大跟随越紧、越小越拖尾。
+## 平滑跟随速度：值越大越紧跟目标，越小越"飘"。
 @export var position_smoothing_speed: float = 6.0:
 	set(value):
 		position_smoothing_speed = value
 		if camera != null:
 			camera.position_smoothing_speed = value
 
-## 相机内容左边界（世界坐标像素）。
+## 相机左边界（世界坐标像素）：限制可视范围，防止露出关卡外。默认 ±1000 万即不限制。
 @export var limit_left: int = -10000000:
 	set(value):
 		limit_left = value
 		if camera != null:
 			camera.limit_left = value
 
-## 相机内容上边界（世界坐标像素）。
+## 相机上边界（世界坐标像素），语义同 limit_left。
 @export var limit_top: int = -10000000:
 	set(value):
 		limit_top = value
 		if camera != null:
 			camera.limit_top = value
 
-## 相机内容右边界（世界坐标像素）。
+## 相机右边界（世界坐标像素），语义同 limit_left。
 @export var limit_right: int = 10000000:
 	set(value):
 		limit_right = value
 		if camera != null:
 			camera.limit_right = value
 
-## 相机内容下边界（世界坐标像素）。
+## 相机下边界（世界坐标像素），语义同 limit_left。
 @export var limit_bottom: int = 10000000:
 	set(value):
 		limit_bottom = value
@@ -64,19 +62,20 @@ class_name AuCameraRig
 
 @export_group("Dead Zone")
 
-## 死区半尺寸（像素）：目标超出该范围才推动相机；保持 ZERO 则为完全硬跟随。
+## 死区尺寸（像素）：目标在该矩形内移动时相机不动，超出才被拖动。为 0 表示紧跟随。
+## 只在对应轴大于 0 时对该轴生效。
 @export var dead_zone: Vector2 = Vector2.ZERO
 
 @export_group("Shake")
 
-## 抖动强度低于该值时判定结束，并复位相机偏移。
+## 抖动收敛阈值：强度衰减到该值以下即视为结束，直接归位到 base_offset，避免残留微抖。
 @export var shake_cutoff: float = 0.05
 
-## 轻微档预设：x = 像素幅度，y = 每秒衰减系数。
+## 轻微抖动：x = 强度（像素振幅），y = 衰减速度（越大收得越快）。
 @export var shake_light: Vector2 = Vector2(5.0, 3.0)
-## 中等档预设：x = 像素幅度，y = 每秒衰减系数。
+## 中等抖动：x = 强度，y = 衰减速度。
 @export var shake_medium: Vector2 = Vector2(12.0, 1.5)
-## 强烈档预设：x = 像素幅度，y = 每秒衰减系数。
+## 强烈抖动：x = 强度，y = 衰减速度。
 @export var shake_heavy: Vector2 = Vector2(20.0, 0.8)
 
 var camera: Camera2D

@@ -109,7 +109,13 @@ func _ready() -> void:
 
 | 方法 | 说明 |
 | --- | --- |
-| `look_up()` / `look_down()` / `clear_look()` | 在允许的区域上偏移相机 Y，幅度 `LOOK_MAGNITUDE = 100`（负=向上） |
+| `look_up()` / `look_down()` / `clear_look()` | 在**允许的区域**上偏移相机 Y，幅度 `LOOK_MAGNITUDE = 100`（负=向上） |
+
+生效条件：角色必须处在 `AuCameraLockArea` 内，且该区域的 `can_look_up` / `can_look_down` 为 true；开放区域（不在任何锁定区域内）抬头不推动相机。
+
+偏移在 `LOOK_TWEEN_DURATION = 0.25s` 内平滑推进到目标值，松手（`clear_look()`）同样平滑复位。
+
+> **"按住多久才抬头推相机"属于玩法节奏，不放在本插件**：由调用方决定何时调用。玩家角色上是 `look_up` / `look_down` 状态节点的 `camera_look_delay` 导出参数（配合状态机自带的 `elapsed` 计时），达到时长才调用 `look_up()` / `look_down()`，退出时 `clear_look()`。
 
 ### 缩放与边界
 
@@ -133,7 +139,7 @@ func _ready() -> void:
 | `follow_changed(node)` | 跟随锚点变更 |
 | `active_area_changed(area)` | 生效的锁定区域变化（可为 `null`） |
 | `override_started(node)` / `override_ended(node)` | 过场接管开始 / 结束 |
-| `look_changed(offset)` | 注视偏移变化 |
+| `look_changed(offset)` | 注视偏移目标值变化（`look_up` = -100，`look_down` = +100，复位 = 0） |
 
 ## 用法示例
 
@@ -151,7 +157,7 @@ AuCameraDirector.clear()
 AuCameraDirector.set_limits(0, 0, 3200, 1800)
 AuCameraDirector.snap()
 
-# 按住方向上/下键时（Timer 驱动）
+# 抬头状态里按住够时长后推动相机；退出时复位
 AuCameraDirector.look_up()
 AuCameraDirector.clear_look()
 ```
