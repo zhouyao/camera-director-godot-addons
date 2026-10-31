@@ -45,13 +45,21 @@ func _ready() -> void:
 
 func _get_or_create_collision() -> CollisionShape2D:
 	var collision := get_node_or_null("CollisionShape2D") as CollisionShape2D
-	if collision != null:
+	if collision == null:
+		collision = CollisionShape2D.new()
+		collision.name = "CollisionShape2D"
+		collision.debug_color = Color(0.249, 1.046, 0.0, 0.3)
+		collision.shape = RectangleShape2D.new()
+		add_child(collision)
 		return collision
-	collision = CollisionShape2D.new()
-	collision.name = "CollisionShape2D"
-	collision.debug_color = Color(0.249, 1.046, 0.0, 0.3)
-	collision.shape = RectangleShape2D.new()
-	add_child(collision)
+	# 复用已存在的 CollisionShape2D 时，强制每个节点持有独立的 RectangleShape2D。
+	# 否则场景保存去重 / 节点复制会导致多个 lock 共享同一份 shape 子资源，
+	# 出现"改一个、另一个也变"的联动。（duplicate 总会生成新的独立实例，
+	# 比判断 resource_local_to_scene 更可靠，因为嵌入 .tscn 的共享子资源也标记为 local。）
+	if collision.shape is RectangleShape2D:
+		collision.shape = collision.shape.duplicate()
+	else:
+		collision.shape = RectangleShape2D.new()
 	return collision
 
 
