@@ -93,8 +93,13 @@ func _ready() -> void:
 	if camera == null:
 		camera = Camera2D.new()
 		camera.name = "Camera2D"
+		# 本项目开启了 2D 物理插值，相机必须按物理帧采样；显式声明可避免
+		# "overridden to physics process mode due to use of physics interpolation" 警告
+		# （该警告在相机 ENTER_TREE 时判定，所以必须在 add_child 之前设置）。
+		camera.process_callback = Camera2D.CAMERA2D_PROCESS_PHYSICS
 		add_child(camera)
 
+	camera.process_callback = Camera2D.CAMERA2D_PROCESS_PHYSICS
 	camera.zoom = zoom
 	camera.offset = base_offset
 	camera.position_smoothing_enabled = position_smoothing_enabled
@@ -141,7 +146,9 @@ func snap_to_target() -> void:
 		camera.reset_smoothing()
 
 
-func _process(delta: float) -> void:
+## 抖动用物理帧驱动：物理插值模式下 Camera2D 只在物理 tick 采样 offset，
+## 放在 _process 里改 offset 实际要等到下个物理帧才生效，会出现阶梯感。
+func _physics_process(delta: float) -> void:
 	if _shake_strength <= 0.0:
 		return
 
