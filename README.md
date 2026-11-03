@@ -64,8 +64,10 @@ func _ready() -> void:
 
 | 导出参数 | 说明 |
 | --- | --- |
-| `horizontal_lock_marker` | 非空则把相机 X 锁到该 Marker2D 的全局 X |
-| `vertical_lock_marker` | 非空则把相机 Y 锁到该 Marker2D 的全局 Y |
+| `horizontal_lock_marker` | 非空则锁定相机 X（配合 `horizontal_range` 决定可移动带宽） |
+| `vertical_lock_marker` | 非空则锁定相机 Y（配合 `vertical_range` 决定可移动带宽） |
+| `horizontal_range` | 以 `horizontal_lock_marker` 的 X 为中心的 ± 可移动距离（像素）；`0` 表示钉死（默认） |
+| `vertical_range` | 以 `vertical_lock_marker` 的 Y 为中心的 ± 可移动距离（像素）；`0` 表示钉死（默认） |
 | `can_look_up` / `can_look_down` | 是否允许该区域内用注视偏移推动相机 |
 | `area_size` | 碰撞矩形尺寸（默认 600×600） |
 | `centered` | 碰撞矩形是否以节点原点为中心 |
