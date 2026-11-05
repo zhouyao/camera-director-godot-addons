@@ -60,22 +60,46 @@ func _ready() -> void:
 
 ### 3. 锁定区域
 
-放一个 `Area2D`，挂 `AuCameraLockArea` 脚本：
+放一个 `Area2D`，挂 `AuCameraLockArea` 脚本。Inspector 里按四组排列：
+
+**① 区域 Shape & Detection**
 
 | 导出参数 | 说明 |
 | --- | --- |
-| `horizontal_lock_marker` | 非空则锁定相机 X（配合 `horizontal_range` 决定可移动带宽） |
-| `vertical_lock_marker` | 非空则锁定相机 Y（配合 `vertical_range` 决定可移动带宽） |
+| `area_size` | 触发区域宽高（默认 600×600），写入 `CollisionShape2D` 的矩形尺寸 |
+| `centered` | 是否以节点原点为中心；`false` 时矩形从 `(0,0)` 向右下展开 |
+| `detect_layer` | 本区域所在的物理层，写入 `Area2D.collision_layer`（默认 16 = 第 5 层）。**不**决定谁能触发本区域 |
+
+**② 锁定 Lock**（子组：参考点 Markers / 活动范围 Ranges）
+
+| 导出参数 | 说明 |
+| --- | --- |
+| `horizontal_lock_marker` | 非空则锁定相机 X 到该 Marker2D 的 X |
+| `vertical_lock_marker` | 非空则锁定相机 Y 到该 Marker2D 的 Y；留空即只锁水平 |
 | `horizontal_range` | 以 `horizontal_lock_marker` 的 X 为中心的 ± 可移动距离（像素）；`0` 表示钉死（默认） |
 | `vertical_range` | 以 `vertical_lock_marker` 的 Y 为中心的 ± 可移动距离（像素）；`0` 表示钉死（默认） |
+
+**③ 镜头行为 Look**
+
+| 导出参数 | 说明 |
+| --- | --- |
 | `can_look_up` / `can_look_down` | 是否允许该区域内用注视偏移推动相机 |
-| `area_size` | 碰撞矩形尺寸（默认 600×600） |
-| `centered` | 碰撞矩形是否以节点原点为中心 |
-| `detect_layer` | 检测角色进出所用的物理层（默认 `16`，即第 5 层 “Areas and Zones”），会同步写入 `Area2D.collision_layer` |
+
+**④ 编辑器预览 Editor Preview**
+
+| 导出参数 | 说明 |
+| --- | --- |
+| `show_corners_in_editor` | 在 2D 编辑器里画四角实心方框与矩形轮廓（默认开，运行时不画） |
+| `fill_alpha` | **矩形内部填充不透明度，默认 `0` = 完全透明**；调大才铺淡色块。作用于 Godot 自带的 `CollisionShape2D.debug_color`（编辑器绘制专用），所以直接决定了那层绿色半透明填充是否出现 |
+| `corner_color` | 四角方框与矩形轮廓的颜色，Inspector 里可配 |
+| `corner_size` | 方框边长（世界单位，缩小时自动放大） |
+
+预览时矩形**只描边、不填充**，不遮挡底下的关卡内容；引擎的 debug 形状在 alpha=0 时可能连轮廓都不画，脚本会补一条描边，保证矩形仍可辨。以上全部仅编辑器生效。
 
 玩家进入 / 离开自动 `register_area` / `unregister_area`，无需手写信号连接。
 
-> **碰撞层**：请通过 `detect_layer` 配置，不要直接改内置的 `collision_layer`——`_ready()` 会用 `detect_layer` 覆盖它。角色的 `collision_mask` 必须包含该层，否则进出不会被检测到。
+> **碰撞层**：`detect_layer` 写入的是本 Area2D 的 `collision_layer`（供其它查询按层筛选），`_ready()` 会覆盖它，不要直接改内置的 `collision_layer`。
+> 能否检测到角色取决于**本 Area2D 的 `collision_mask`** 是否包含角色所在层 —— 玩家默认在第 1 层、Area2D 默认 `mask = 1`，所以开箱即用；要换检测对象请改 `collision_mask`，而不是 `detect_layer`。
 
 ## API（全部通过 `AuCameraDirector` 单例调用）
 

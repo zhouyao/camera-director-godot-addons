@@ -2,6 +2,12 @@ extends Node2D
 class_name AuCameraRig
 
 
+## 缩放发生变化时发出（包含 tween 期间的逐帧变化）。
+## 项目侧可借此同步任何依赖 zoom 的逻辑（例如相机边界的换算）。
+## 插件本身不引用项目 autoload，保持可复用。
+signal zoom_changed(new_zoom: Vector2)
+
+
 ## 相机基础偏移（像素）：在不移动锚点的前提下微调取景，同时也是抖动结束后的归位基准。
 @export var base_offset: Vector2 = Vector2(-27.585, -13.195):
 	set(value):
@@ -15,6 +21,7 @@ class_name AuCameraRig
 		zoom = value
 		if camera != null:
 			camera.zoom = value
+		zoom_changed.emit(value)
 
 @export_group("Camera2D")
 
