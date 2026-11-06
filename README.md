@@ -14,12 +14,14 @@ addons/camera_director/
 └── behaviors/
 	├── camera_behavior.gd           # AuCameraBehavior 基类（RefCounted）
 	├── follow_behavior.gd           # priority = 0    跟随
-	├── lock_area_behavior.gd        # priority = 10   锁定区域
+	├── lock_area_behavior.gd        # priority = 锁区 camera_priority（默认 10）  锁定区域
 	└── shot_behavior.gd             # priority = 100  过场接管
 ```
 
 **数据流**：`AuCameraDirector._process()` → 按 `priority` 升序排序所有行为 → 依次 `resolve(ctx)` 修改共享上下文 `ctx = {"target": Vector2, "zoom": Vector2|null}` → 把结果交给 `AuCameraRig` 执行。
 优先级高的行为后执行，因此**可以覆盖低优先级写入的值**（锁定区域盖住跟随，过场盖住锁定区域）。
+
+> **优先级只管 `ctx.target`**：`Camera2D.limit_*` 是行为链之后由引擎做的硬钳制，任何 `priority` 都改不了它。需要让锁区突破关卡边界时，用锁区的 `override_bounds`（见「3. 锁定区域」）。
 
 ## 安装
 
@@ -60,7 +62,7 @@ func _ready() -> void:
 
 ### 3. 锁定区域
 
-放一个 `Area2D`，挂 `AuCameraLockArea` 脚本。Inspector 里按四组排列：
+放一个 `Area2D`，挂 `AuCameraLockArea` 脚本。Inspector 里按五组排列：
 
 **① 区域 Shape & Detection**
 
@@ -79,13 +81,24 @@ func _ready() -> void:
 | `horizontal_range` | 以 `horizontal_lock_marker` 的 X 为中心的 ± 可移动距离（像素）；`0` 表示钉死（默认） |
 | `vertical_range` | 以 `vertical_lock_marker` 的 Y 为中心的 ± 可移动距离（像素）；`0` 表示钉死（默认） |
 
-**③ 镜头行为 Look**
+**③ 优先级 & 边界 Priority & Bounds**
+
+| 导出参数 | 说明 |
+| --- | --- |
+| `camera_priority` | 多个锁区同时生效时的执行顺序（默认 `10`；跟随 = 0、过场接管 = 100）。数值大的后写入、覆盖前面的结果；也决定谁有权启用边界覆盖 |
+| `override_bounds` | 本区域生效时允许锁定目标突破 `Camera2D.limit_*`（即关卡 `CameraBounds` 的硬边界）；离开后自动恢复。**只放宽真正配了 Marker 的那根轴** |
+
+> **为什么需要 `override_bounds`**：`CameraBoundsRect` 换算出的 `limit_*` 是引擎对最终位置的**硬钳制**，发生在行为链之后。锁区的目标一旦落在 `limit` 之外，镜头会被直接拉回来，看起来就像"锁定没生效"。行为优先级只作用于 `ctx.target`，管不到这一步，所以必须显式放宽边界。
+>
+> 名字不能叫 `priority`：`Area2D` 自带同名属性（物理区域覆盖顺序），`@export` 会报「重复成员」。
+
+**④ 镜头行为 Look**
 
 | 导出参数 | 说明 |
 | --- | --- |
 | `can_look_up` / `can_look_down` | 是否允许该区域内用注视偏移推动相机 |
 
-**④ 编辑器预览 Editor Preview**
+**⑤ 编辑器预览 Editor Preview**
 
 | 导出参数 | 说明 |
 | --- | --- |
@@ -148,8 +161,10 @@ func _ready() -> void:
 | 方法 | 说明 |
 | --- | --- |
 | `tween_zoom(z, duration = 0.4)` | 直接缓动缩放，并把 `_base_zoom` 设为 `z` |
-| `set_limits(l, t, r, b)` | 设置相机边界 |
-| `snap()` | 立即对齐到目标并重置平滑（切场景/传送后消除拖尾） |
+| `set_limits(l, t, r, b)` | 设置**关卡硬边界（基底）**。这是锁区 `override_bounds` 撤销后的回落值，不是"最后写入者赢" |
+| `snap()` | 立即对齐到目标并重置平滑（切场景/传送后消除拖尾）；入场锁区由插件自动调用，见「注意事项」 |
+
+> 边界分两层：`set_limits()` 记下**基底**，`AuCameraRig.set_center_override()` 是锁区临时叠加的**覆盖**。最终写给 `Camera2D` 的是两者按轴并集的结果，由 `_refresh_limits()` 合成，值没变就不重复写。
 
 ### 抖动
 
@@ -214,3 +229,6 @@ func resolve(ctx: Dictionary) -> void:
 - `AuCameraRig` 用 `zoom` 属性的 setter 驱动 `Camera2D`，不要直接改 `Camera2D.zoom`，否则缓动与回落会不同步。
 - 抖动通过修改 `camera.offset` 实现，结束后复位到 `base_offset`；若手动改过 offset 会被覆盖。
 - 换关卡务必调用 `AuCameraDirector.clear()`，否则上一关的锁定区域 / 过场行为会残留。
+- **边界覆盖撤销不会立刻收缩**：出了 `override_bounds` 区域后，`clear_center_override()` 只是标了"待收缩"，要等**画面实际中心**（`Camera2D.get_screen_center_position()`）在**被放宽过的那根轴**上回到基底范围内，才真正收回 `limit_*`。判据刻意不用"相机目标位置"——开了位置平滑时目标已经回框、画面还滞留在上方，此时收 limit 会把画面硬钳到边界，表现为跳下平台瞬间镜头一顿。`LIMIT_SHRINK_TOLERANCE`（10px）就是这个判据的容差，也等于收缩可能造成的最大可见位移；它要盖住"目标合法地略微越界"的情形（地面玩家中心 425 vs 基底范围下沿 432）。没被放宽的轴不参与判断。发生瞬移（`teleport_to()` / 换关）时强制立刻收回。调边界时别以为改完就马上生效。
+- **`set_limits()` 的语义是"基底"**：如果覆盖生效期间调用它，新值会成为新的基底，覆盖仍叠加在上面。
+- **入场硬切由插件内建**：`clear()` 开启入场窗口，`AuCameraRig.teleport_to()`（换关 / 读档 / 传送的瞬移）刷新它；窗口内 `AuCameraLockArea` 由 `body_entered` 注册时，插件自动按「跟随 + 锁区」解析出的最终目标 `snap()`，避免 `Camera2D.position_smoothing` 把镜头从入口高度缓慢拉到锁定高度。窗口按 `_process` 帧递减（暂停期间不消耗，故冷启动黑场解锁后才注册也覆盖），过期后正常进出锁区恢复平滑。项目侧只需照常 `clear()` 与瞬移，不用手动补 `snap()`、也不用距离阈值，因此 dash / 转身 / 分镜推镜等连续运动不受影响。

@@ -19,6 +19,9 @@ const LOOK_TWEEN_DURATION := 0.25
 
 const ZOOM_TWEEN_DURATION := 0.4
 
+## 入场硬切窗口（_process 帧数）：窗口内锁区注册就立刻重切，覆盖 Area2D 晚注册的情况。
+const ENTRY_SNAP_FRAMES := 30
+
 
 var _rig: AuCameraRig = null
 
@@ -29,6 +32,7 @@ var _look_offset := 0.0
 var _look_target := 0.0
 var _active_area: AuCameraLockArea = null
 var _warned_no_follow := false
+var _entry_snap_frames := 0
 
 var _base_zoom: Vector2 = Vector2.ONE
 var _active_zoom: Vector2 = Vector2.ONE
@@ -53,6 +57,14 @@ func set_follow(node: Node2D) -> void:
 
 func clear() -> void:
 	_reset_level_state()
+	# 换关时玩家会被暂时摘出场景树，但锚点对象仍然合法：留着它，_process 会继续
+	# 把相机写到"旧房间坐标"，等玩家落到新入口再硬切，中间那段位移就容易露出残留滑动。
+	_follow_behavior._target = null
+	# 换关期间没有跟随目标是正常状态，别刷"尚未设置跟随锚点"的警告。
+	_warned_no_follow = true
+	# 换关即开启入场窗口：锁区由 body_entered 异步注册，窗口内注册会自动硬切。
+	# 项目侧只需照常 clear() + teleport_to()，不用再补任何 snap 时机。
+	_entry_snap_frames = ENTRY_SNAP_FRAMES
 
 func _reset_level_state() -> void:
 	for i in range(_behaviors.size() - 1, -1, -1):
@@ -63,6 +75,10 @@ func _reset_level_state() -> void:
 	_active_area = null
 	_zoom_held = false
 	_active_zoom = _base_zoom
+	_entry_snap_frames = 0
+	# 换关 / 重绑 Rig 时收回上一关的边界覆盖，否则会把旧关卡的放宽 limits 带过来。
+	if is_instance_valid(_rig):
+		_rig.clear_center_override()
 
 
 func register_area(area: AuCameraLockArea) -> void:
@@ -72,6 +88,11 @@ func register_area(area: AuCameraLockArea) -> void:
 		if b is AuLockAreaBehavior and (b as AuLockAreaBehavior).area == area:
 			return
 	_behaviors.append(AuLockAreaBehavior.new(area, _look_offset))
+	# 入场窗口内注册：立刻按最新目标硬切，否则 Camera2D 平滑会把镜头从入口高度慢慢拉过去。
+	# snap() 经 teleport_to() 刷新窗口，所以同帧连续注册多个锁区会各自重切，
+	# 最终落在最后一个锁区的目标上；窗口过期后正常进出锁区仍走平滑。
+	if _entry_snap_frames > 0:
+		snap()
 
 func unregister_area(area: AuCameraLockArea) -> void:
 	for i in range(_behaviors.size() - 1, -1, -1):
@@ -143,9 +164,30 @@ func set_limits(l: int, t: int, r: int, b: int) -> void:
 	if is_instance_valid(_rig):
 		_rig.set_limits(l, t, r, b)
 
+## 刷新入场窗口（由 AuCameraRig.teleport_to() 自动调用，项目侧不用管）。
+## 瞬移是"入场事务"的天然起点：窗口按 _process 帧递减，暂停期间不消耗，
+## 因此冷启动黑场里加载再久、解锁后锁区才注册，也仍在窗口内会被自动硬切。
+func begin_entry_snap() -> void:
+	_entry_snap_frames = ENTRY_SNAP_FRAMES
+
+
+## 把相机硬切到"当前行为链"解析出的目标（跟随锚点 + 锁定区 + 分镜）。
+## 换关 / 读档后调用：只对准跟随锚点会让 Camera2D 平滑把镜头从入口高度拉到锁定高度。
 func snap() -> void:
-	if is_instance_valid(_rig):
+	if not is_instance_valid(_rig):
+		return
+	if not is_instance_valid(_follow_behavior._target):
 		_rig.snap_to_target()
+		return
+	_prune_invalid()
+	for b in _behaviors:
+		if b is AuLockAreaBehavior:
+			(b as AuLockAreaBehavior).look_offset = _look_offset
+	# 必须在 teleport_to() 之前：入场锁区若开了 override_bounds，旧 limit 会先把镜头夹回去。
+	_update_bounds_override()
+	var ctx := _resolve_context()
+	var target: Vector2 = ctx["target"]
+	_rig.teleport_to(target)
 
 
 func shake(strength: float, fade: float, direction: Vector2 = Vector2.ZERO) -> void:
@@ -166,6 +208,11 @@ func shake_heavy() -> void:
 
 
 func _process(delta: float) -> void:
+	# 入场窗口只在 _process 里消耗：暂停期间（冷启动黑场）不递减，
+	# 解锁后锁区才注册也仍在窗口内。
+	if _entry_snap_frames > 0:
+		_entry_snap_frames -= 1
+
 	if not is_instance_valid(_rig):
 		return
 
@@ -185,12 +232,8 @@ func _process(delta: float) -> void:
 
 	_prune_invalid()
 
-	_behaviors.sort_custom(_sort_by_priority)
-
-	var ctx := {"target": Vector2.ZERO, "zoom": null}
-	for b in _behaviors:
-		b.resolve(ctx)
-
+	var ctx := _resolve_context()
+	_update_bounds_override()
 	_rig.set_target_pos(ctx["target"])
 	_apply_zoom(ctx["zoom"])
 
@@ -198,6 +241,45 @@ func _process(delta: float) -> void:
 	if top_area != _active_area:
 		_active_area = top_area
 		active_area_changed.emit(top_area)
+
+## 让优先级最高的锁定区决定能否突破关卡硬边界。
+## Camera2D 的 limit_* 是最终位置的硬钳制，行为优先级再高也改不了它：
+## 锁区目标一旦落在 limit 之外，镜头就会被拉回来，看起来像"锁定没生效"。
+func _update_bounds_override() -> void:
+	if not is_instance_valid(_rig):
+		return
+	var area := _top_area()
+	if area == null or not area.override_bounds:
+		_rig.clear_center_override()
+		return
+
+	# reach = 相机中心需要能到达的世界矩形；axes 标记哪根轴可以突破。
+	var reach := Rect2()
+	var axes := Vector2i.ZERO
+	if is_instance_valid(area.horizontal_lock_marker):
+		var rx := maxf(0.0, area.horizontal_range)
+		reach.size.x = rx * 2.0
+		reach.position.x = area.horizontal_lock_marker.global_position.x - rx
+		axes.x = 1
+	if is_instance_valid(area.vertical_lock_marker):
+		var ry := maxf(0.0, area.vertical_range)
+		# 抬头 / 低头偏移也是本区域加上去的，边界要留够 LOOK_MAGNITUDE，否则会被夹回去。
+		var look := LOOK_MAGNITUDE if (area.can_look_up or area.can_look_down) else 0.0
+		reach.size.y = (ry + look) * 2.0
+		reach.position.y = area.vertical_lock_marker.global_position.y - ry - look
+		axes.y = 1
+	if axes == Vector2i.ZERO:
+		_rig.clear_center_override()
+		return
+	_rig.set_center_override(reach, axes)
+
+## 按当前行为链同步解析相机目标与缩放；抽出来给 snap() 复用，不依赖 _process 的帧序。
+func _resolve_context() -> Dictionary:
+	_behaviors.sort_custom(_sort_by_priority)
+	var ctx := {"target": Vector2.ZERO, "zoom": null}
+	for b in _behaviors:
+		b.resolve(ctx)
+	return ctx
 
 func _apply_zoom(desired: Variant) -> void:
 	if desired != null:
@@ -225,8 +307,13 @@ func _prune_invalid() -> void:
 			_behaviors.remove_at(i)
 
 func _top_area() -> AuCameraLockArea:
+	# 取 camera_priority 最大的那个；同优先级时后注册者胜出（与行为链"后执行覆盖"一致）。
 	var found: AuCameraLockArea = null
+	var best := -2147483648
 	for b in _behaviors:
-		if b is AuLockAreaBehavior and is_instance_valid((b as AuLockAreaBehavior).area):
-			found = (b as AuLockAreaBehavior).area
+		if b is AuLockAreaBehavior:
+			var a: AuCameraLockArea = (b as AuLockAreaBehavior).area
+			if is_instance_valid(a) and a.camera_priority >= best:
+				best = a.camera_priority
+				found = a
 	return found

@@ -8,7 +8,7 @@ var look_offset: float
 func _init(a: AuCameraLockArea, look: float) -> void:
 	area = a
 	look_offset = look
-	priority = 10
+	priority = a.camera_priority
 
 func resolve(ctx: Dictionary) -> void:
 	if not is_instance_valid(area):
